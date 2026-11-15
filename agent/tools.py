@@ -119,8 +119,8 @@ class ToolRegistry:
             elif name == "update_ticket_status":
                 validated = UpdateStatusArgs(**args)
                 output = self._update_ticket_status(validated)
-                is_error = "Error:" in output
-                err_type = "WrongToolError" if is_error else None
+                is_error = "Error:" in output or "DENIED" in output
+                err_type = "UserRejectionError" if "DENIED" in output else ("WrongToolError" if is_error else None)
 
             elif name == "draft_reply":
                 validated = DraftReplyArgs(**args)
@@ -247,6 +247,17 @@ class ToolRegistry:
                 f"Idempotent update: Ticket '{args.ticket_id}' is already at status '{args.status}' "
                 f"with tags {list(existing_tags)}. No database modification performed."
             )
+
+        # Human Checkpoint Approval Gate
+        if self.checkpoint_handler:
+            approved, reason = self.checkpoint_handler(
+                ticket_id=args.ticket_id,
+                action_type=f"UPDATE_STATUS_TO_{args.status}",
+                payload={"new_status": args.status, "tags": list(new_tags)},
+                idempotency_key=f"{args.ticket_id}-STATUS-{args.status}",
+            )
+            if not approved:
+                return f"Human Checkpoint DENIED status update for ticket '{args.ticket_id}'. Reason: {reason}."
 
         merged_tags = list(existing_tags.union(new_tags))
         cursor.execute(
