@@ -1,0 +1,26 @@
+# Environment variables & API keys
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Sandbox runtime data
+sandbox/data/*.db
+sandbox/data/*.json
+sandbox/data/emails/*.eml
+!sandbox/data/seed_emails.json
+
+# Logs & trajectories
+logs/*.jsonl
+eval/results/*.json
