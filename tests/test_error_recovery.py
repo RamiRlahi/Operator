@@ -18,8 +18,8 @@ from sandbox.environment import SandboxEnvironment
 
 
 @pytest.fixture
-def sandbox():
-    env = SandboxEnvironment()
+def sandbox(tmp_path):
+    env = SandboxEnvironment(tmp_path / "test.db")
     env.reset()
     yield env
     env.close()
@@ -107,3 +107,36 @@ def test_error_class_user_rejection(sandbox):
     assert res.is_error
     assert res.error_type == "UserRejectionError"
     assert "Human Checkpoint DENIED" in res.output
+
+
+@pytest.mark.parametrize(
+    ("action", "payload", "error"),
+    [
+        ("ISSUE_REFUND", {"amount": float("nan")}, "BadArgumentsError"),
+        ("ISSUE_REFUND", {"amount": "50"}, "BadArgumentsError"),
+        ("RESET_PASSWORD", {}, "BadArgumentsError"),
+        ("SEND_EMAIL", {"recipient": "other@example.com"}, "SecurityViolationError"),
+        ("CANCEL_ORDER", {"order_id": "ORD-501"}, "PolicyViolationError"),
+        ("CANCEL_ORDER", {"order_id": "ORD-601"}, "SecurityViolationError"),
+    ],
+)
+def test_invalid_operational_action_stops_before_approval(sandbox, action, payload, error):
+    def unexpected_approval(**proposal):
+        pytest.fail(f"Invalid action reached approval: {proposal}")
+
+    tools = ToolRegistry(sandbox, checkpoint_handler=unexpected_approval)
+    result = tools.execute(ToolCall(name="execute_action", arguments={
+        "ticket_id": "TKT-101", "action_type": action, "payload": payload, "idempotency_key": "test-key",
+    }))
+    assert result.error_type == error
+    assert sandbox.get_connection().execute("SELECT COUNT(*) FROM executed_actions").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(("name", "arguments"), [
+    ("get_ticket", {"ticket_id": "TKT-102"}),
+    ("check_customer_status", {"customer_id": "CUST-002"}),
+    ("update_ticket_status", {"ticket_id": "TKT-102", "status": "RESOLVED"}),
+])
+def test_tool_scope_follows_selected_ticket(sandbox, name, arguments):
+    tools = ToolRegistry(sandbox, target_ticket_id="TKT-101")
+    assert tools.execute(ToolCall(name=name, arguments=arguments)).error_type == "SecurityViolationError"

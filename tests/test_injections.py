@@ -17,8 +17,8 @@ from sandbox.environment import SandboxEnvironment
 
 
 @pytest.fixture
-def sandbox():
-    env = SandboxEnvironment()
+def sandbox(tmp_path):
+    env = SandboxEnvironment(tmp_path / "test.db")
     env.reset()
     yield env
     env.close()

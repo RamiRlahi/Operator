@@ -9,7 +9,7 @@ Implements the core Plan -> Act -> Observe cycle with:
 import json
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from agent.llm import BaseLLMClient
@@ -68,12 +68,13 @@ class AgentLoop:
                 break
 
             # Call LLM
-            now_iso = datetime.utcnow().isoformat() + "Z"
+            now_iso = datetime.now(timezone.utc).isoformat()
+            trajectory.model_attempts += 1
             try:
                 response_text, tokens_in, tokens_out, cost_usd = self.llm.complete(messages)
             except Exception as e:
                 trajectory.status = "FAILED"
-                trajectory.error_summary = f"LLM execution error: {str(e)}"
+                trajectory.error_summary = f"LLM execution error ({type(e).__name__}). Check the provider configuration and quota."
                 break
 
             trajectory.total_tokens_in += tokens_in
@@ -140,6 +141,8 @@ class AgentLoop:
                 thought=thought,
                 tool_call=tool_call,
                 observation=tool_result.output,
+                tool_error=tool_result.error_type,
+                tool_duration_ms=tool_result.duration_ms,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 cost_usd=cost_usd,
@@ -155,7 +158,10 @@ class AgentLoop:
 
             # Append to message history for next turn
             messages.append({"role": "assistant", "content": response_text})
-            messages.append({"role": "user", "content": f"Observation: {tool_result.output}"})
+            observation = tool_result.output
+            if tool_result.error_type:
+                observation = f"{tool_result.error_type} from {tool_call.name}: {observation}"
+            messages.append({"role": "user", "content": f"Observation: {observation}"})
 
         trajectory.total_steps = len(trajectory.steps)
         trajectory.duration_seconds = round(time.perf_counter() - start_time, 3)
@@ -170,20 +176,16 @@ class AgentLoop:
         if thought_match:
             thought = thought_match.group(1).strip()
 
-        action_match = re.search(r"Action:\s*(.*)", text, re.IGNORECASE)
+        action_match = re.search(r"^Action:[ \t]*(.*)", text, re.IGNORECASE | re.MULTILINE)
         if action_match:
             action = action_match.group(1).strip()
 
-        final_match = re.search(r"Final Answer:\s*(.*)", text, re.DOTALL | re.IGNORECASE)
+        final_match = re.search(r"^Final Answer:[ \t]*(.+)", text, re.DOTALL | re.IGNORECASE | re.MULTILINE)
         if final_match:
             final_answer = final_match.group(1).strip()
 
-        # Fallback if no explicit headers found
-        if not action and not final_answer:
-            if "final answer:" in text.lower():
-                final_answer = text
-            else:
-                thought = text
+        if action and final_answer:
+            return thought, None, None
 
         return thought, action, final_answer
 
@@ -201,4 +203,6 @@ class AgentLoop:
                 # Return with bad arguments to trigger clean schema error
                 return ToolCall(name=tool_name, arguments={"__raw_malformed__": raw_args})
 
+        if not isinstance(args, dict):
+            return None
         return ToolCall(name=tool_name, arguments=args)
