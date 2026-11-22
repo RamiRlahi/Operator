@@ -4,26 +4,30 @@ Ensures strict validation, type safety, trajectory logging, and error representa
 """
 
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
 # Tool Argument Models (Strict Input Schemas)
 # ---------------------------------------------------------------------------
 
-class GetTicketArgs(BaseModel):
+class ToolArgs(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+
+class GetTicketArgs(ToolArgs):
     ticket_id: str = Field(..., description="The unique ID of the ticket to inspect (e.g., TKT-101).")
 
 
-class SearchKBArgs(BaseModel):
+class SearchKBArgs(ToolArgs):
     query: str = Field(..., min_length=2, max_length=200, description="Keywords or topic to search in the knowledge base.")
 
 
-class CheckCustomerArgs(BaseModel):
+class CheckCustomerArgs(ToolArgs):
     customer_id: str = Field(..., description="Customer ID or email address to query profile and purchase history.")
 
 
-class UpdateStatusArgs(BaseModel):
+class UpdateStatusArgs(ToolArgs):
     ticket_id: str = Field(..., description="The unique ID of the ticket.")
     status: Literal["OPEN", "IN_PROGRESS", "RESOLVED", "ESCALATED", "ARCHIVED"] = Field(
         ..., description="The new status to assign to the ticket."
@@ -31,21 +35,21 @@ class UpdateStatusArgs(BaseModel):
     tags: List[str] = Field(default_factory=list, description="Categorization tags to apply.")
 
 
-class DraftReplyArgs(BaseModel):
+class DraftReplyArgs(ToolArgs):
     ticket_id: str = Field(..., description="The unique ID of the ticket.")
     recipient: str = Field(..., description="Email of recipient.")
     subject: str = Field(..., min_length=3, description="Subject line for the reply.")
     body: str = Field(..., min_length=5, description="Draft response body.")
 
 
-class ExecuteActionArgs(BaseModel):
+class ExecuteActionArgs(ToolArgs):
     ticket_id: str = Field(..., description="The unique ID of the ticket.")
     action_type: Literal["SEND_EMAIL", "ISSUE_REFUND", "RESET_PASSWORD", "CANCEL_ORDER"] = Field(
         ..., description="High-impact action to execute. Must pass human checkpoint."
     )
     payload: Dict[str, Any] = Field(..., description="Specific parameters for the action.")
     idempotency_key: str = Field(
-        ..., description="Unique key to prevent duplicate writes if repeated (e.g., TKT-101-REFUND-001)."
+        ..., min_length=1, max_length=150, description="Unique key to prevent duplicate writes if repeated (e.g., TKT-101-REFUND-001)."
     )
 
 
@@ -73,6 +77,8 @@ class AgentStep(BaseModel):
     thought: str
     tool_call: Optional[ToolCall] = None
     observation: Optional[str] = None
+    tool_error: Optional[str] = None
+    tool_duration_ms: Optional[float] = None
     is_final: bool = False
     final_response: Optional[str] = None
     tokens_in: int = 0
@@ -86,6 +92,7 @@ class Trajectory(BaseModel):
     scenario_name: str
     steps: List[AgentStep] = Field(default_factory=list)
     total_steps: int = 0
+    model_attempts: int = 0
     total_tokens_in: int = 0
     total_tokens_out: int = 0
     total_cost_usd: float = 0.0

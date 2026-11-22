@@ -10,14 +10,16 @@
 
 ### One Setup Command
 ```bash
-pip install -r requirements.txt && python sandbox/reset.py
+python -m pip install -r requirements.txt && python sandbox/reset.py
 ```
 
 ### One Run Command
 ```bash
 python main.py --ticket TKT-101
 ```
-*(Runs interactive triage with human checkpoint approval gate)*
+Requires Python 3.10 or newer. On Windows, `py` can replace `python` in the commands.
+
+This command uses the offline model by default and consumes no API credits. Each new status change, draft, or operational action prompts for its own approval. A denied action ends the run. An earlier approved action may already be saved in the sandbox.
 
 ### Run Evaluation Suite (35 Scenarios)
 ```bash
@@ -60,9 +62,9 @@ The Operator is an autonomous agent designed to triage incoming customer support
    - Idempotent writes: duplicate requests with the same idempotency key are safely blocked without repeated database side effects.
    - Clear text error feedback: errors return actionable diagnostic text without stack traces.
 2. **Loop & Stopping Conditions (`agent/loop.py`)**:
-   - Guaranteed mathematical termination enforced by three independent bounds:
+   - The loop rechecks the attempt count and estimated spend each turn. It also stops when it sees a cycle or a final answer:
      - Hard step limit (`max_steps=10`)
-     - Monetary budget limit (`max_budget_usd=$0.25`)
+     - Estimated dollar threshold checked between attempts
      - Action cycle detector (`max_cycles=2` identical repeating actions)
      - Done-rule (`Final Answer:`)
 3. **Sandbox Environment (`sandbox/`)**:
@@ -71,42 +73,31 @@ The Operator is an autonomous agent designed to triage incoming customer support
 4. **Human Checkpoint Gatekeeper (`agent/checkpoint.py`)**:
    - Prominently displays action type, payload, idempotency key, and target ticket.
    - Halts execution and requires explicit human approval (`[y/N]`) before committing state changes.
-5. **Threat Model & Prompt Injection Defense (`threat_model.md`)**:
+5. **Threat Model & Prompt Injection Defence (`threat_model.md`)**:
    - Structural isolation of untrusted input using `<UNTRUSTED_CUSTOMER_INPUT>` delimiters.
-   - Hard policy constraints preventing unauthorized refunds over $150.00 and unauthorized email dispatches.
-   - Evaluated against 7 adversarial attack vectors with 100% block rate.
+   - Tool-level refund limits, registered-recipient checks and approval. The sandbox records email and reset requests in SQLite.
+   - Seven offline injection scenarios verify escalation and absence of committed operational actions.
 
 ---
 
-## 3. Evaluation Results
+## 3. Offline Evaluation
 
-Results from evaluating the agent across all 35 benchmark scenarios (`eval/results/eval_report.json`):
+```bash
+python main.py --eval
+python -m pytest -q
+```
 
-| Evaluation Metric | Measured Result | Assignment Target | Status |
-|---|---|---|---|
-| **Total Test Scenarios** | **35 scenarios** | ≥ 30 scenarios | Passed |
-| **Overall Task Success Rate** | **100.0%** (35/35) | High | Passed |
-| **Per-Step Accuracy** | **56.43%** | Path correctness | Passed |
-| **Tool-Call Precision** | **98.57%** | Schema adherence | Passed |
-| **Average Wasted Steps / Task** | **1.80 steps** | Minimal overhead | Passed |
-| **Recovery-After-Failure Rate** | **100.0%** (6/6) | ≥ 80% | Passed |
-| **Prompt Injection Defense** | **100.0%** (7/7 blocked) | 5+ test cases | Passed |
-| **Stop Rule Violations** | **0 violations** | Never exceeded | Passed |
-| **Latency p50 / p95** | **0.0092s / 0.0178s** | Responsive | Passed |
-| **Average Cost per Task** | **$0.00082** | < $0.05 | Passed |
-| **Cost at 100× Scale** | **$0.0825** | Cost model | Passed |
+The benchmark starts each scenario in a fresh test state in a temporary SQLite database. It checks the order of expected calls, ticket identity, forbidden calls, stop status and selected database outcomes. It deliberately triggers invalid arguments, a missing knowledge-base result and a timeout. The JSON report includes tool arguments, observations, latencies, errors, approvals and token estimates.
 
----
+The course report is in `report.pdf`. Start with `WALKTHROUGH.md` for a guided demo and an explanation of each module.
 
-## 4. Cost Model
+## 4. Bloomi and Cost
 
-Token usage is measured per step and computed using `gpt-4o-mini` pricing ($0.15 / 1M input tokens, $0.60 / 1M output tokens):
-- **Average Tokens per Task**: ~5,200 tokens
-- **Average Cost per Task**: **$0.00082 USD** (less than one tenth of a cent per ticket)
-- **Cost for 100 Tasks**: **$0.0825 USD**
-- **Cost for 10,000 Tasks**: **$8.25 USD**
+Offline runs use zero API credits. Offline token counts and USD values are illustrative. The runner projects the average estimated cost across 100 comparable tasks.
 
----
+The optional live client expects an OpenAI-compatible chat-completions endpoint. Verify the course's API base URL, model, allowance and pricing. Copy `.env.example` to `.env`, fill it locally and keep the key private. Set `MAX_STEPS=1` for a first connectivity check through a real task, then raise it only if needed. Run `python main.py --live --ticket TKT-101` once configured.
+
+Live mode has a six-attempt default, 500 output tokens per request, a 30-second SDK timeout and zero automatic retries. The estimated dollar threshold is checked between requests and a single response can take it over the threshold. The course's gateway and live usage were not verified in the delivered build.
 
 ## 5. Repository Structure
 
@@ -155,3 +146,5 @@ ailab/
 - **Tool Development & Safety Guardrails**: Implementation of 6 tools with Pydantic validation, deterministic idempotency keys, and human-in-the-loop approval gate.
 - **Evaluation & Security**: Construction of 35 benchmark scenarios, 7 adversarial prompt injection vectors, trajectory metrics calculator, and error taxonomy suite.
 - **Documentation**: README, threat model, error taxonomy, and engineering postmortem.
+
+Add the team members’ names next to the work they personally completed before submission.

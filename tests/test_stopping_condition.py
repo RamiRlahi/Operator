@@ -41,8 +41,8 @@ class AlternatingInfiniteLoopMockLLM(BaseLLMClient):
 
 
 @pytest.fixture
-def test_env():
-    env = SandboxEnvironment()
+def test_env(tmp_path):
+    env = SandboxEnvironment(tmp_path / "test.db")
     env.reset()
     yield env
     env.close()
@@ -65,6 +65,7 @@ def test_stopping_condition_max_steps_proof(test_env):
     trajectory = loop.run("PROOF-001", "Trigger runaway alternating loop.")
     assert trajectory.status == "STOPPED_MAX_STEPS"
     assert trajectory.total_steps == 5
+    assert trajectory.model_attempts == 5
     assert len(trajectory.steps) == 5
     assert "Hard step limit of 5 steps reached" in trajectory.error_summary
 
@@ -119,7 +120,8 @@ def test_stopping_condition_cycle_detector_proof(test_env):
 
     trajectory = loop.run("PROOF-003", "Trigger identical repeating calls.")
     assert trajectory.status == "STOPPED_CYCLE"
-    assert trajectory.total_steps <= 4
+    assert trajectory.total_steps == 2
+    assert trajectory.model_attempts == 3
     assert "Infinite loop detected" in trajectory.error_summary
 
 
